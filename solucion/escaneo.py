@@ -51,6 +51,7 @@ def escanear(host: str, puertos: dict, max_hilos: int = 10) -> dict:
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_hilos) as ejecutor:
         # submit entrega una tarea y devuelve un FUTURO (un resultado que llegará luego).
         # Se arma {futuro: puerto} para saber, al final, a qué puerto corresponde cada uno.
+        # Se lee: "para cada p de puertos, guarda futuro -> p" (comprensión de diccionario).
         futuros = {ejecutor.submit(estado_puerto, host, p): p for p in puertos}
         for futuro in concurrent.futures.as_completed(futuros):  # cada uno apenas termina
             resultados[futuros[futuro]] = futuro.result()
@@ -60,7 +61,9 @@ def escanear(host: str, puertos: dict, max_hilos: int = 10) -> dict:
 
 
 if __name__ == "__main__":
-    # Este bloque solo corre si se ejecuta el archivo directamente.
+    # __name__ vale "__main__" solo si se ejecuta este archivo directamente
+    # (python3 escaneo.py), y no cuando otro archivo lo importa.
     from config import PUERTOS, TARGET_HOST
     for puerto, estado in escanear(TARGET_HOST, PUERTOS).items():
+        # En un f-string, {puerto:>5} alinea el número a la derecha en 5 espacios.
         print(f"Puerto {puerto:>5}/tcp  {estado}  ({PUERTOS[puerto]})")

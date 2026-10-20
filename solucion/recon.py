@@ -66,5 +66,7 @@ def main() -> int:
     return 0
 
 
+# __name__ vale "__main__" solo si se ejecuta este archivo directamente.
+# raise SystemExit(...) termina el programa entregando al sistema el código de main().
 if __name__ == "__main__":
     raise SystemExit(main())

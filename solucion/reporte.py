@@ -23,9 +23,12 @@ def generar_json(puertos: dict, enumeracion: dict, host: str,
     os.makedirs(directorio, exist_ok=True)  # crea la carpeta; si ya existe, no pasa nada
     ahora = datetime.now(timezone.utc)
     # Nombre con fecha y hora hasta el microsegundo: dos reconocimientos nunca se pisan.
+    # En el f-string, {ahora:%Y%m%d_%H%M%S_%f} da formato a la fecha (%Y año, %m mes,
+    # %d día, %H hora, %M minutos, %S segundos, %f microsegundos). replace cambia . por _.
     nombre = f"recon_{host.replace('.', '_')}_{ahora:%Y%m%d_%H%M%S_%f}.json"
     ruta = os.path.join(directorio, nombre)  # une carpeta y nombre: salida/recon_...
-    # abiertos: lista de los puertos cuyo estado es "ABIERTO".
+    # abiertos: lista de los puertos cuyo estado es "ABIERTO". Se lee: "para cada par
+    # (p, estado), guarda p si el estado es ABIERTO" (comprensión de lista).
     abiertos = [p for p, estado in puertos.items() if estado == "ABIERTO"]
     reporte = {
         "metadata": {
@@ -54,6 +57,7 @@ def imprimir_resumen(puertos: dict, enumeracion: dict, host: str) -> None:
     print("\n" + "=" * 60)
     print(f"  RECONOCIMIENTO CONTROLADO - Objetivo: {host}")
     print("=" * 60)
+    # {'Puerto':<10} escribe el texto y lo rellena con espacios hasta 10: forma columnas.
     print(f"\n{'Puerto':<10} {'Estado'}")
     print("-" * 30)
     for puerto, estado in puertos.items():

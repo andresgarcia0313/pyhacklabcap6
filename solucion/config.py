@@ -88,4 +88,6 @@ def verificar_red(objetivo: str) -> None:
     # subnet_of pregunta "¿esta red cabe entera dentro de la permitida?".
     # "not" invierte la respuesta: si NO cabe, se lanza un error ANTES de tocar la red.
     if not red_objetivo.subnet_of(permitida):
+        # "raise" lanza un ERROR que detiene todo. La f antes de las comillas crea un
+        # f-string: lo que va entre { } se reemplaza por su valor al armar el mensaje.
         raise PermissionError(f"El objetivo {objetivo} está fuera de la red permitida {RED_PERMITIDA}")

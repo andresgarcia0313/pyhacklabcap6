@@ -66,6 +66,10 @@ Paquete armado (todavía sin enviar):
     IP / TCP 127.0.0.1:40000 > 127.0.0.1:10022 S
     Bandera TCP: S  destino: puerto 10022
 
+Para enviarlo de verdad se necesitan permisos de administrador:
+    sudo .venv/bin/python paquetes_scapy.py --enviar
+Sin permisos, los puertos se miran con escaneo.py (Paso 2).
+
 ========== Limpieza ==========
 [sim] detenido
 
@@ -103,13 +107,19 @@ LABORATORIO COMPLETADO
 }
 ```
 
-## Nota sobre el envío con Scapy
+## Envío real con Scapy (opcional, con permisos de administrador)
 
-Enviar los paquetes de verdad (`syn_scan`) necesita permisos de administrador. Sin ellos,
-Scapy responde `PermissionError: [Errno 1] Operation not permitted` al abrir el socket de
-bajo nivel, lo cual es esperado. Por eso el recorrido automático solo arma el paquete y la
-revisión de puertos se hace por conexión (Paso 2), que no requiere permisos.
+Con el objetivo encendido (`python3 simulador_lab06.py`) y permisos de administrador:
+
+```
+$ sudo .venv/bin/python paquetes_scapy.py --enviar
+Paquete armado (todavía sin enviar):
+    IP / TCP 127.0.0.1:40000 > 127.0.0.1:10022 S
+    Bandera TCP: S  destino: puerto 10022
+    Enviado al puerto 10022: ABIERTO
+    Enviado al puerto 10080: CERRADO
 ```
 
-sudo python3 paquetes_scapy.py   # envía a 127.0.0.1 y clasifica la respuesta (requiere permisos)
-```
+Coincide con la revisión por conexión del Paso 2. Sin permisos, `syn_scan` responde
+`PermissionError: [Errno 1] Operation not permitted`, que es lo esperado; por eso el
+recorrido automático solo arma el paquete y el resto del laboratorio no necesita `sudo`.

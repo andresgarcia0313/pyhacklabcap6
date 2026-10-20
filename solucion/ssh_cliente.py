@@ -63,15 +63,21 @@ def descargar(cliente, remoto: str) -> bytes:
         sftp.close()  # pase lo que pase, se cierra el canal de archivos
 
 
+# __name__ vale "__main__" solo cuando este archivo se ejecuta directamente
+# (python3 ssh_cliente.py), y no cuando otro archivo lo importa.
 if __name__ == "__main__":
-    usuario, clave = credenciales()
+    usuario, clave = credenciales()  # una función que devuelve 2 valores se recibe en 2 variables
     if not clave:  # sin clave en el entorno no se intenta nada
-        sys.exit("[!] Defina la variable LAB06_PASSWORD con la clave del laboratorio")
+        sys.exit("[!] Defina LAB06_PASSWORD con la clave del laboratorio y vuelva a intentarlo")
     cliente = conectar(TARGET_HOST, PUERTO_SSH, usuario, clave)
     if cliente is None:
-        sys.exit(1)
+        sys.exit(1)  # sys.exit termina el programa; 1 avisa al sistema que algo falló
     try:
         for nombre, valor in enumerar(cliente).items():
-            print(f"[{nombre.upper()}] {valor}")
+            # f"..." es un f-string: lo que va entre { } se reemplaza por su valor.
+            # .upper() pasa a mayúsculas y .splitlines()[0] toma solo la primera línea.
+            print(f"[{nombre.upper()}] {valor.splitlines()[0]}")
+        # .decode() convierte los bytes recibidos en texto para poder mostrarlos.
+        print(f"\nArchivo por SFTP: {descargar(cliente, '/informe.txt').decode().splitlines()[0]}")
     finally:
         cliente.close()

@@ -26,7 +26,7 @@ datos estructurados).
 | Ya viene listo (no lo modifique) | Para qué sirve |
 |---|---|
 | `servicios_simulados.py`, `simulador_lab06.py` | Hacen de "objetivo": un servidor SSH que responde con datos de ejemplo y un par de puertos abiertos, todo en `127.0.0.1`. |
-| `pasos/` | Un script de comprobación por paso. |
+| `pasos/` | Scripts de comprobación de los pasos 1, 2 y 5 (en los pasos 3, 4 y 6 se ejecuta directamente el archivo creado). |
 | `validar.py` | Validación final del reporte (después del Paso 6). |
 | `test_escaneo_local.py`, `test_ssh.py`, `test_seguridad.py` | 14 pruebas automáticas que revisan su código. |
 | `ejecutar_laboratorio.sh`, `limpiar.sh` | Comprobación final completa y limpieza. |
@@ -222,6 +222,8 @@ def verificar_red(objetivo: str) -> None:
     # subnet_of pregunta "¿esta red cabe entera dentro de la permitida?".
     # "not" invierte la respuesta: si NO cabe, se lanza un error ANTES de tocar la red.
     if not red_objetivo.subnet_of(permitida):
+        # "raise" lanza un ERROR que detiene todo. La f antes de las comillas crea un
+        # f-string: lo que va entre { } se reemplaza por su valor al armar el mensaje.
         raise PermissionError(f"El objetivo {objetivo} está fuera de la red permitida {RED_PERMITIDA}")
 ```
 
@@ -320,6 +322,7 @@ def escanear(host: str, puertos: dict, max_hilos: int = 10) -> dict:
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_hilos) as ejecutor:
         # submit entrega una tarea y devuelve un FUTURO (un resultado que llegará luego).
         # Se arma {futuro: puerto} para saber, al final, a qué puerto corresponde cada uno.
+        # Se lee: "para cada p de puertos, guarda futuro -> p" (comprensión de diccionario).
         futuros = {ejecutor.submit(estado_puerto, host, p): p for p in puertos}
         for futuro in concurrent.futures.as_completed(futuros):  # cada uno apenas termina
             resultados[futuros[futuro]] = futuro.result()
@@ -329,9 +332,11 @@ def escanear(host: str, puertos: dict, max_hilos: int = 10) -> dict:
 
 
 if __name__ == "__main__":
-    # Este bloque solo corre si se ejecuta el archivo directamente.
+    # __name__ vale "__main__" solo si se ejecuta este archivo directamente
+    # (python3 escaneo.py), y no cuando otro archivo lo importa.
     from config import PUERTOS, TARGET_HOST
     for puerto, estado in escanear(TARGET_HOST, PUERTOS).items():
+        # En un f-string, {puerto:>5} alinea el número a la derecha en 5 espacios.
         print(f"Puerto {puerto:>5}/tcp  {estado}  ({PUERTOS[puerto]})")
 ```
 
@@ -388,25 +393,35 @@ mirar un paquete no necesita permisos especiales y no envía nada.
 Enviarlo de verdad y leer la respuesta sí necesita permisos de administrador
 (se ejecuta con sudo), porque el sistema reserva esa capacidad. Por eso este
 archivo separa las dos cosas: construir y clasificar (cualquiera puede) y enviar
-(solo con sudo). Para mirar puertos sin permisos, use escaneo.py del Paso 2.
+(solo con sudo y la opción --enviar). Para mirar puertos sin permisos, use escaneo.py.
+
+Banderas TCP que aparecen aquí (son letras en inglés):
+  S = SYN (synchronize, sincronizar): "quiero empezar una conexión".
+  A = ACK (acknowledge, confirmar): "recibido".
+  R = RST (reset, reiniciar): "corto la conexión".
 """
 import random  # incluido en Python: números al azar
 import sys      # incluido en Python: argumentos de la línea de comandos
 
-# De Scapy se traen solo las piezas que se usan. IP es la capa de dirección,
-# TCP la de puertos y banderas, conf/sr1/send controlan el envío.
-from scapy.all import IP, TCP, conf, send, sr1
+# De Scapy se traen solo las piezas que se usan: IP es la capa de dirección, TCP la
+# de puertos y banderas, conf guarda la configuración, send envía un paquete y
+# sr1 (send and receive 1, enviar y recibir una respuesta) envía y espera la respuesta.
+from scapy.all import IP, TCP, L3RawSocket, conf, send, sr1
 
 from config import verificar_red
 
 conf.verb = 0  # silencia los mensajes automáticos de Scapy
+# En la interfaz loopback (127.0.0.1) Scapy necesita un socket "raw" (crudo) para
+# leer bien las respuestas; sin este ajuste, un puerto abierto parecería cerrado.
+conf.L3socket = L3RawSocket
 
 
 def construir_syn(host: str, puerto: int, origen: int) -> IP:
     """
     Arma un paquete que toca la puerta de un puerto, sin completar la conexión.
     El signo / en Scapy APILA capas: IP(...) / TCP(...) mete la capa TCP dentro de la IP.
-    flags="S" marca el paquete como "inicio de conexión". No se envía aquí.
+    dst (destination) es el destino; sport y dport (source/destination port) son los
+    puertos de origen y de destino. flags="S" marca el inicio de conexión. No se envía aquí.
     """
     verificar_red(host)  # control de uso responsable: incluso al solo construir
     return IP(dst=host) / TCP(sport=origen, dport=puerto, flags="S")
@@ -414,23 +429,23 @@ def construir_syn(host: str, puerto: int, origen: int) -> IP:
 
 def clasificar_respuesta(respuesta) -> str:
     """Traduce la respuesta del objetivo a una palabra: ABIERTO, CERRADO o FILTRADO."""
-    # "is None" es verdadero cuando no llegó respuesta. haslayer pregunta si el
-    # paquete trae una capa TCP; sin ella, no hay nada que interpretar.
+    # "is None" es verdadero cuando no llegó respuesta. haslayer ("tiene capa")
+    # pregunta si el paquete trae una capa TCP; sin ella, no hay nada que interpretar.
     if respuesta is None or not respuesta.haslayer(TCP):
         return "FILTRADO"
     banderas = str(respuesta[TCP].flags)  # las banderas como texto, por ejemplo "SA"
-    if banderas == "SA":   # el objetivo aceptó: puerto abierto
+    if banderas == "SA":   # SYN + ACK: el objetivo aceptó, puerto abierto
         return "ABIERTO"
-    if "R" in banderas:    # el objetivo cortó en seco: puerto cerrado
+    if "R" in banderas:    # RST: el objetivo cortó en seco, puerto cerrado
         return "CERRADO"
-    return f"DESCONOCIDO ({banderas})"
+    return f"DESCONOCIDO ({banderas})"  # f-string: {banderas} se reemplaza por su valor
 
 
 def syn_scan(host: str, puertos: list, timeout: float = 1.0) -> dict:
     """
     Envía un paquete a cada puerto y clasifica la respuesta. REQUIERE sudo.
-    Si un puerto responde que acepta, se envía de inmediato un corte para no dejar
-    la conexión a medias. Devuelve {puerto: estado}.
+    timeout es el tiempo máximo de espera, en segundos. Si un puerto acepta, se
+    envía de inmediato un RST para no dejar la conexión a medias. Devuelve {puerto: estado}.
     """
     verificar_red(host)
     resultados = {}
@@ -444,41 +459,57 @@ def syn_scan(host: str, puertos: list, timeout: float = 1.0) -> dict:
     return resultados
 
 
+# __name__ vale "__main__" solo cuando este archivo se ejecuta directamente.
 if __name__ == "__main__":
-    # Sin sudo: arma un paquete y muestra sus campos, sin enviarlo. Esto siempre funciona.
-    host = sys.argv[1] if len(sys.argv) > 1 else "127.0.0.1"
-    paquete = construir_syn(host, 10022, 40000)
+    # sys.argv es la lista de palabras escritas después de "python3": aquí se
+    # pregunta si entre ellas está "--enviar".
+    enviar = "--enviar" in sys.argv
+    paquete = construir_syn("127.0.0.1", 10022, 40000)
     print("Paquete armado (todavía sin enviar):")
-    print("   ", paquete.summary())  # resumen en una línea de lo que lleva el paquete
+    print("   ", paquete.summary())  # summary: resumen en una línea de lo que lleva el paquete
     print(f"    Bandera TCP: {paquete[TCP].flags}  destino: puerto {paquete[TCP].dport}")
-    print("\nPara enviarlo de verdad y leer la respuesta se necesitan permisos:")
-    print(f"    sudo python3 paquetes_scapy.py   (envía a {host})")
-    print("Sin permisos, mire los puertos con el Paso 2:  python3 escaneo.py")
+    if enviar:  # solo con permisos de administrador
+        for puerto, estado in syn_scan("127.0.0.1", [10022, 10080]).items():
+            print(f"    Enviado al puerto {puerto}: {estado}")
+    else:
+        print("\nPara enviarlo de verdad se necesitan permisos de administrador:")
+        print("    sudo .venv/bin/python paquetes_scapy.py --enviar")
+        print("Sin permisos, los puertos se miran con escaneo.py (Paso 2).")
 ```
 
 **Prediga:** el paquete va de un puerto de origen (40000) al puerto 10022 del objetivo.
 ¿Qué letra cree que mostrará como "bandera", la que marca el inicio de una conexión?
 
-Este paso no necesita el objetivo ni permisos:
+Este paso no necesita el objetivo ni permisos. Ejecute el archivo que acaba de crear:
 
 ```bash
-python3 pasos/paso3_paquete.py
+python3 paquetes_scapy.py
 ```
 
 Salida esperada:
 
 ```
-Resumen del paquete:
+Paquete armado (todavía sin enviar):
     IP / TCP 127.0.0.1:40000 > 127.0.0.1:10022 S
+    Bandera TCP: S  destino: puerto 10022
 
-Bandera TCP: S  (S = inicio de conexión)
-Puerto de origen: 40000  ->  Puerto de destino: 10022
+Para enviarlo de verdad se necesitan permisos de administrador:
+    sudo .venv/bin/python paquetes_scapy.py --enviar
+Sin permisos, los puertos se miran con escaneo.py (Paso 2).
 ```
 
 **Fíjese en** la `S` al final del resumen: es la marca de "quiero empezar una conexión".
-El archivo también trae `syn_scan`, que envía estos paquetes de verdad; esa parte necesita
-`sudo` y, por eso, en el recorrido automático solo armamos el paquete, sin enviarlo. Si más
-adelante tiene permisos, pruebe `sudo python3 paquetes_scapy.py` y compare.
+Armar el paquete no envió nada. Si tiene permisos de administrador y el objetivo está
+encendido en la terminal A, puede enviarlo de verdad (se usa `.venv/bin/python` porque
+`sudo` no ve el entorno virtual activado):
+
+```bash
+sudo .venv/bin/python paquetes_scapy.py --enviar
+```
+
+Salida esperada, al final: `Enviado al puerto 10022: ABIERTO` y `Enviado al puerto 10080: CERRADO`.
+Es la misma conclusión del Paso 2, obtenida ahora paquete a paquete. Si no tiene permisos,
+no pasa nada: el resto del laboratorio no los necesita.
 
 ## Paso 4: entrar por SSH y pedir datos (`ssh_cliente.py`)
 
@@ -557,16 +588,22 @@ def descargar(cliente, remoto: str) -> bytes:
         sftp.close()  # pase lo que pase, se cierra el canal de archivos
 
 
+# __name__ vale "__main__" solo cuando este archivo se ejecuta directamente
+# (python3 ssh_cliente.py), y no cuando otro archivo lo importa.
 if __name__ == "__main__":
-    usuario, clave = credenciales()
+    usuario, clave = credenciales()  # una función que devuelve 2 valores se recibe en 2 variables
     if not clave:  # sin clave en el entorno no se intenta nada
-        sys.exit("[!] Defina la variable LAB06_PASSWORD con la clave del laboratorio")
+        sys.exit("[!] Defina LAB06_PASSWORD con la clave del laboratorio y vuelva a intentarlo")
     cliente = conectar(TARGET_HOST, PUERTO_SSH, usuario, clave)
     if cliente is None:
-        sys.exit(1)
+        sys.exit(1)  # sys.exit termina el programa; 1 avisa al sistema que algo falló
     try:
         for nombre, valor in enumerar(cliente).items():
-            print(f"[{nombre.upper()}] {valor}")
+            # f"..." es un f-string: lo que va entre { } se reemplaza por su valor.
+            # .upper() pasa a mayúsculas y .splitlines()[0] toma solo la primera línea.
+            print(f"[{nombre.upper()}] {valor.splitlines()[0]}")
+        # .decode() convierte los bytes recibidos en texto para poder mostrarlos.
+        print(f"\nArchivo por SFTP: {descargar(cliente, '/informe.txt').decode().splitlines()[0]}")
     finally:
         cliente.close()
 ```
@@ -577,7 +614,7 @@ laboratorio la da el instructor; aquí usamos la del simulador):
 **Prediga:** ¿qué tres datos cree que traerá del objetivo, y qué dirá la línea del usuario?
 
 ```bash
-LAB06_PASSWORD='laboratorio123' python3 pasos/paso4_ssh.py
+LAB06_PASSWORD='laboratorio123' python3 ssh_cliente.py
 ```
 
 Salida esperada:
@@ -592,7 +629,8 @@ Archivo por SFTP: informe de practica del objetivo simulado
 
 **Fíjese en** que la clave no está en ningún archivo: la pusimos delante del comando, como
 una variable de entorno. Si la omite, el programa se detiene y se lo recuerda, en vez de
-traer una clave escondida en el código. Pruebe a ejecutarlo sin `LAB06_PASSWORD` y lea el aviso.
+traer una clave escondida en el código. Pruebe `python3 ssh_cliente.py` sin `LAB06_PASSWORD` y verá:
+`[!] Defina LAB06_PASSWORD con la clave del laboratorio y vuelva a intentarlo`.
 
 ## Paso 5: el reporte (`reporte.py`)
 
@@ -630,9 +668,12 @@ def generar_json(puertos: dict, enumeracion: dict, host: str,
     os.makedirs(directorio, exist_ok=True)  # crea la carpeta; si ya existe, no pasa nada
     ahora = datetime.now(timezone.utc)
     # Nombre con fecha y hora hasta el microsegundo: dos reconocimientos nunca se pisan.
+    # En el f-string, {ahora:%Y%m%d_%H%M%S_%f} da formato a la fecha (%Y año, %m mes,
+    # %d día, %H hora, %M minutos, %S segundos, %f microsegundos). replace cambia . por _.
     nombre = f"recon_{host.replace('.', '_')}_{ahora:%Y%m%d_%H%M%S_%f}.json"
     ruta = os.path.join(directorio, nombre)  # une carpeta y nombre: salida/recon_...
-    # abiertos: lista de los puertos cuyo estado es "ABIERTO".
+    # abiertos: lista de los puertos cuyo estado es "ABIERTO". Se lee: "para cada par
+    # (p, estado), guarda p si el estado es ABIERTO" (comprensión de lista).
     abiertos = [p for p, estado in puertos.items() if estado == "ABIERTO"]
     reporte = {
         "metadata": {
@@ -661,6 +702,7 @@ def imprimir_resumen(puertos: dict, enumeracion: dict, host: str) -> None:
     print("\n" + "=" * 60)
     print(f"  RECONOCIMIENTO CONTROLADO - Objetivo: {host}")
     print("=" * 60)
+    # {'Puerto':<10} escribe el texto y lo rellena con espacios hasta 10: forma columnas.
     print(f"\n{'Puerto':<10} {'Estado'}")
     print("-" * 30)
     for puerto, estado in puertos.items():
@@ -790,6 +832,8 @@ def main() -> int:
     return 0
 
 
+# __name__ vale "__main__" solo si se ejecuta este archivo directamente.
+# raise SystemExit(...) termina el programa entregando al sistema el código de main().
 if __name__ == "__main__":
     raise SystemExit(main())
 ```
